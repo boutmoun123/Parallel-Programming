@@ -17,7 +17,7 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->decimal('price', 10, 2);
             $table->integer('stock_quantity')->default(0);
-            $table->integer('version')->default(1);
+            $table->integer('quantity_counter')->default(0);
             $table->enum('status', ['active', 'inactive'])->default('active');
             $table->json('photos')->nullable();
             $table->timestamps();
