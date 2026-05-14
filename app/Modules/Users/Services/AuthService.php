@@ -18,7 +18,8 @@ class AuthService
             'name' => $data['name'],
             'phone' => $data['phone'],
             'password' => $data['password'],
-            'role' => 'user',
+            'role' => $data['role'] ?? 'user',
+
         ]);
 
         return $this->tokenResponse($user);

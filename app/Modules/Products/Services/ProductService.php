@@ -5,9 +5,12 @@ namespace App\Modules\Products\Services;
 use App\Models\Product;
 use App\Modules\Products\Resources\ProductResource;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
+use Throwable;
 
 class ProductService
 {
@@ -89,8 +92,16 @@ class ProductService
     public function createProduct(array $data): Product
     {
         $data['quantity_counter'] ??= $data['stock_quantity'];
+        $storedPhotos = $this->storeUploadedPhotos($data['photos'] ?? []);
+        $data['photos'] = $storedPhotos;
 
-        $product = Product::create($data);
+        try {
+            $product = Product::create($data);
+        } catch (Throwable $exception) {
+            $this->deleteStoredPhotos($storedPhotos);
+
+            throw $exception;
+        }
 
         $this->clearCatalogCaches();
 
@@ -109,8 +120,29 @@ class ProductService
             throw new InvalidArgumentException('Quantity counter cannot exceed stock quantity.');
         }
 
-        $product->fill($data);
-        $product->save();
+        $storedPhotos = null;
+
+        if (array_key_exists('photos', $data)) {
+            $storedPhotos = $this->storeUploadedPhotos($data['photos'] ?? []);
+            $data['photos'] = $storedPhotos;
+        }
+
+        $existingPhotos = $product->photos ?? [];
+
+        try {
+            $product->fill($data);
+            $product->save();
+        } catch (Throwable $exception) {
+            if ($storedPhotos !== null) {
+                $this->deleteStoredPhotos($storedPhotos);
+            }
+
+            throw $exception;
+        }
+
+        if ($storedPhotos !== null) {
+            $this->deleteStoredPhotos($existingPhotos);
+        }
 
         $this->clearProductCaches($product->id);
 
@@ -120,8 +152,10 @@ class ProductService
     public function deleteProduct(Product $product): void
     {
         $productId = $product->id;
+        $storedPhotos = $product->photos ?? [];
 
         $product->delete();
+        $this->deleteStoredPhotos($storedPhotos);
 
         $this->clearProductCaches($productId);
     }
@@ -274,5 +308,34 @@ class ProductService
     private function productDetailsCacheKey(int $productId): string
     {
         return "products:details:{$productId}";
+    }
+
+    /**
+     * @param  array<int, UploadedFile>  $photos
+     * @return list<string>
+     */
+    private function storeUploadedPhotos(array $photos): array
+    {
+        return array_values(array_map(
+            fn (UploadedFile $photo): string => $photo->store('products', 'public'),
+            $photos,
+        ));
+    }
+
+    /**
+     * @param  array<int, mixed>  $photos
+     */
+    private function deleteStoredPhotos(array $photos): void
+    {
+        $storedPhotos = array_values(array_filter(
+            $photos,
+            fn (mixed $photo): bool => is_string($photo) && ! filter_var($photo, FILTER_VALIDATE_URL),
+        ));
+
+        if ($storedPhotos === []) {
+            return;
+        }
+
+        Storage::disk('public')->delete($storedPhotos);
     }
 }

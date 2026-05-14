@@ -4,6 +4,7 @@ namespace App\Modules\Products\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class ProductResource extends JsonResource
 {
@@ -12,7 +13,10 @@ class ProductResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $photos = $this->photos ?? [];
+        $photos = array_values(array_filter(array_map(
+            fn (mixed $photo): ?string => $this->photoUrl($request, $photo),
+            $this->photos ?? [],
+        )));
 
         return [
             'id' => $this->id,
@@ -28,5 +32,21 @@ class ProductResource extends JsonResource
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];
+    }
+
+    private function photoUrl(Request $request, mixed $photo): ?string
+    {
+        if (! is_string($photo) || $photo === '') {
+            return null;
+        }
+
+        if (filter_var($photo, FILTER_VALIDATE_URL)) {
+            return $photo;
+        }
+
+        $storageUrl = Storage::disk('public')->url($photo);
+        $path = parse_url($storageUrl, PHP_URL_PATH) ?: $storageUrl;
+
+        return rtrim($request->getSchemeAndHttpHost(), '/').'/'.ltrim($path, '/');
     }
 }

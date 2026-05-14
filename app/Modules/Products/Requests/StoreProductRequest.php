@@ -27,7 +27,7 @@ class StoreProductRequest extends FormRequest
             'quantity_counter' => ['sometimes', 'integer', 'min:0', 'lte:stock_quantity'],
             'status' => ['required', Rule::in(['active', 'inactive'])],
             'photos' => ['nullable', 'array'],
-            'photos.*' => ['string', 'max:2048'],
+            'photos.*' => ['image', 'max:5120'],
         ];
     }
 
