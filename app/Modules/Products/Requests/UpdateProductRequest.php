@@ -25,8 +25,8 @@ class UpdateProductRequest extends FormRequest
             'price' => ['sometimes', 'required', 'numeric', 'min:0'],
             'quantity_counter' => ['sometimes', 'integer', 'min:0'],
             'status' => ['sometimes', 'required', Rule::in(['active', 'inactive'])],
-            'photos' => ['nullable', 'array'],
-            'photos.*' => ['string', 'max:2048'],
+            'photos' => ['sometimes', 'array'],
+            'photos.*' => ['image', 'max:5120'],
         ];
     }
 
