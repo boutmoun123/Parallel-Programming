@@ -1,6 +1,8 @@
 <?php
 
 use App\Modules\BenchmarkResults\Controllers\BenchmarkResultController;
+use App\Modules\DailySalesReportItems\Controllers\DailySalesReportItemController;
+use App\Modules\DailySalesReports\Controllers\DailySalesReportController;
 use App\Modules\FailedJobs\Controllers\FailedJobController;
 use App\Modules\Invoices\Controllers\InvoiceController;
 use App\Modules\Notifications\Controllers\NotificationController;
@@ -12,6 +14,8 @@ use App\Modules\InventoryMovements\Controllers\AdminInventoryMovementController;
 use App\Modules\OrderItems\Controllers\OrderItemController;
 use App\Modules\Orders\Controllers\OrderController;
 use App\Modules\Products\Controllers\ProductController;
+use App\Modules\RequestLogs\Controllers\RequestLogController;
+use App\Modules\ServerNodes\Controllers\ServerNodeController;
 use App\Modules\Users\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -69,6 +73,40 @@ Route::prefix('failed-jobs')
         Route::get('/', [FailedJobController::class, 'index']);
         Route::get('/{failedJob}', [FailedJobController::class, 'show']);
     });
+
+Route::prefix('server-nodes')
+    ->middleware('auth:sanctum')
+    ->group(function (): void {
+        Route::get('/', [ServerNodeController::class, 'index']);
+        Route::post('/', [ServerNodeController::class, 'store']);
+        Route::get('/{serverNode}', [ServerNodeController::class, 'show']);
+        Route::put('/{serverNode}', [ServerNodeController::class, 'update']);
+    });
+
+Route::prefix('request-logs')
+    ->middleware('auth:sanctum')
+    ->group(function (): void {
+        Route::get('/', [RequestLogController::class, 'index']);
+        Route::post('/', [RequestLogController::class, 'store']);
+        Route::get('/{requestLog}', [RequestLogController::class, 'show']);
+    });
+
+Route::prefix('daily-sales-reports')
+    ->middleware('auth:sanctum')
+    ->group(function (): void {
+        Route::get('/', [DailySalesReportController::class, 'index']);
+        Route::post('/', [DailySalesReportController::class, 'store']);
+        Route::get('/{dailySalesReport}', [DailySalesReportController::class, 'show']);
+    });
+
+Route::prefix('daily-sales-report-items')
+    ->middleware('auth:sanctum')
+    ->group(function (): void {
+        Route::get('/', [DailySalesReportItemController::class, 'index']);
+        Route::post('/', [DailySalesReportItemController::class, 'store']);
+        Route::get('/{dailySalesReportItem}', [DailySalesReportItemController::class, 'show']);
+    });
+
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::prefix('carts')->group(function (): void {
         Route::get('/', [CartController::class, 'index']);
