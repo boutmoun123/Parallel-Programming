@@ -18,7 +18,7 @@ class AdminMiddleware
                 'success' => false,
                 'message' => 'Admin access required',
                 'data' => null,
-                'errors' => ['role' => ['Only admins can manage products.']],
+                'errors' => ['role' => ['Only admins can manage this resource.']],
             ], 403);
         }
 
