@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "9d876f6a-9d5d-4af9-9650-7f1c2c6b3c91",
     "name": "Parallel Programming API",
-    "description": "Postman collection for testing all current API routes in the Laravel project.",
+    "description": "Postman collection for testing all current API routes in the Laravel project. Commerce tables for carts, orders, and inventory movements exist in the database, but no API routes expose them yet.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -49,6 +49,30 @@
     {
       "key": "product_name",
       "value": "Postman Product"
+    },
+    {
+      "key": "cart_id",
+      "value": ""
+    },
+    {
+      "key": "order_id",
+      "value": ""
+    },
+    {
+      "key": "cart_item_id",
+      "value": ""
+    },
+    {
+      "key": "order_item_id",
+      "value": ""
+    },
+    {
+      "key": "inventory_movement_id",
+      "value": ""
+    },
+    {
+      "key": "order_number",
+      "value": ""
     }
   ],
   "item": [
@@ -592,6 +616,1214 @@
       ]
     },
     {
+      "name": "Carts",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{user_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('cart_id', json.data.id);",
+                  "}",
+                  "",
+                  "pm.test('Cart id saved', function () {",
+                  "    pm.expect(pm.collectionVariables.get('cart_id')).to.not.eql('');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/carts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carts"
+              ]
+            },
+            "description": "Creates a cart for the currently authenticated user and stores the id in {{cart_id}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List Carts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Carts list is an array', function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});",
+                  "",
+                  "if (!pm.collectionVariables.get('cart_id') && Array.isArray(json.data) && json.data.length > 0) {",
+                  "    pm.collectionVariables.set('cart_id', json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carts"
+              ]
+            },
+            "description": "Lists the authenticated user's carts."
+          },
+          "response": []
+        },
+        {
+          "name": "Show Cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Returned cart has matching id', function () {",
+                  "    pm.expect(String(json.data.id)).to.eql(String(pm.collectionVariables.get('cart_id')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carts/{{cart_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carts",
+                "{{cart_id}}"
+              ]
+            },
+            "description": "Shows one cart for the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"checked_out\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/carts/{{cart_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carts",
+                "{{cart_id}}"
+              ]
+            },
+            "description": "Updates the selected cart."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/carts/{{cart_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "carts",
+                "{{cart_id}}"
+              ]
+            },
+            "description": "Deletes the selected cart."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cart Items",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{user_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Cart Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('cart_item_id', json.data.id);",
+                  "}",
+                  "",
+                  "pm.test('Cart item id saved', function () {",
+                  "    pm.expect(pm.collectionVariables.get('cart_item_id')).to.not.eql('');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cart_id\": \"{{cart_id}}\",\n  \"product_id\": \"{{product_id}}\",\n  \"product_name\": \"{{product_name}}\",\n  \"quantity\": 2,\n  \"unit_price\": 49.99\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/cart-items",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart-items"
+              ]
+            },
+            "description": "Creates an item inside {{cart_id}}. Run Create Cart and Create Product first."
+          },
+          "response": []
+        },
+        {
+          "name": "List Cart Items",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Cart items list is an array', function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});",
+                  "",
+                  "if (!pm.collectionVariables.get('cart_item_id') && Array.isArray(json.data) && json.data.length > 0) {",
+                  "    pm.collectionVariables.set('cart_item_id', json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/cart-items",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart-items"
+              ]
+            },
+            "description": "Lists all cart items owned by the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Show Cart Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Returned cart item has matching id', function () {",
+                  "    pm.expect(String(json.data.id)).to.eql(String(pm.collectionVariables.get('cart_item_id')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/cart-items/{{cart_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart-items",
+                "{{cart_item_id}}"
+              ]
+            },
+            "description": "Shows one cart item for the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Cart Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 3,\n  \"unit_price\": 50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/cart-items/{{cart_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart-items",
+                "{{cart_item_id}}"
+              ]
+            },
+            "description": "Updates the selected cart item and recalculates subtotal/cart totals."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Cart Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/cart-items/{{cart_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart-items",
+                "{{cart_item_id}}"
+              ]
+            },
+            "description": "Deletes the selected cart item."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{user_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('order_id', json.data.id);",
+                  "}",
+                  "if (json.data && json.data.order_number) {",
+                  "    pm.collectionVariables.set('order_number', json.data.order_number);",
+                  "}",
+                  "",
+                  "pm.test('Order id saved', function () {",
+                  "    pm.expect(pm.collectionVariables.get('order_id')).to.not.eql('');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cart_id\": \"{{cart_id}}\",\n  \"status\": \"pending\",\n  \"payment_status\": \"unpaid\",\n  \"notes\": \"Created from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "Creates an order for the authenticated user and stores {{order_id}} and {{order_number}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List Orders",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Orders list is an array', function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});",
+                  "",
+                  "if (!pm.collectionVariables.get('order_id') && Array.isArray(json.data) && json.data.length > 0) {",
+                  "    pm.collectionVariables.set('order_id', json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "Lists the authenticated user's orders."
+          },
+          "response": []
+        },
+        {
+          "name": "Show Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Returned order has matching id', function () {",
+                  "    pm.expect(String(json.data.id)).to.eql(String(pm.collectionVariables.get('order_id')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Shows one order for the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"completed\",\n  \"payment_status\": \"paid\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Updates the selected order."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Deletes the selected order."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Order Items",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{user_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Order Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('order_item_id', json.data.id);",
+                  "}",
+                  "",
+                  "pm.test('Order item id saved', function () {",
+                  "    pm.expect(pm.collectionVariables.get('order_item_id')).to.not.eql('');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"{{order_id}}\",\n  \"product_id\": \"{{product_id}}\",\n  \"product_name\": \"{{product_name}}\",\n  \"quantity\": 2,\n  \"unit_price\": 49.99\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order-items",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "order-items"
+              ]
+            },
+            "description": "Creates an item inside {{order_id}}. Run Create Order and Create Product first."
+          },
+          "response": []
+        },
+        {
+          "name": "List Order Items",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Order items list is an array', function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});",
+                  "",
+                  "if (!pm.collectionVariables.get('order_item_id') && Array.isArray(json.data) && json.data.length > 0) {",
+                  "    pm.collectionVariables.set('order_item_id', json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/order-items",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "order-items"
+              ]
+            },
+            "description": "Lists all order items owned by the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Show Order Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Returned order item has matching id', function () {",
+                  "    pm.expect(String(json.data.id)).to.eql(String(pm.collectionVariables.get('order_item_id')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/order-items/{{order_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "order-items",
+                "{{order_item_id}}"
+              ]
+            },
+            "description": "Shows one order item for the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Order Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1,\n  \"unit_price\": 10\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order-items/{{order_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "order-items",
+                "{{order_item_id}}"
+              ]
+            },
+            "description": "Updates the selected order item and recalculates subtotal/order totals."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Order Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/order-items/{{order_item_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "order-items",
+                "{{order_item_id}}"
+              ]
+            },
+            "description": "Deletes the selected order item."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin Inventory Movements",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{admin_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Inventory Movement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('inventory_movement_id', json.data.id);",
+                  "}",
+                  "",
+                  "pm.test('Inventory movement id saved', function () {",
+                  "    pm.expect(pm.collectionVariables.get('inventory_movement_id')).to.not.eql('');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"type\": \"sale\",\n  \"quantity\": 2,\n  \"stock_before\": 10,\n  \"stock_after\": 8,\n  \"unit_price\": 30,\n  \"reason\": \"Created from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/inventory-movements",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "inventory-movements"
+              ]
+            },
+            "description": "Creates an inventory movement as admin. Run Create Product first."
+          },
+          "response": []
+        },
+        {
+          "name": "List Inventory Movements",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Inventory movements list is an array', function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});",
+                  "",
+                  "if (!pm.collectionVariables.get('inventory_movement_id') && Array.isArray(json.data) && json.data.length > 0) {",
+                  "    pm.collectionVariables.set('inventory_movement_id', json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/inventory-movements",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "inventory-movements"
+              ]
+            },
+            "description": "Lists all inventory movement records for admins."
+          },
+          "response": []
+        },
+        {
+          "name": "Show Inventory Movement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Returned inventory movement has matching id', function () {",
+                  "    pm.expect(String(json.data.id)).to.eql(String(pm.collectionVariables.get('inventory_movement_id')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/inventory-movements/{{inventory_movement_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "inventory-movements",
+                "{{inventory_movement_id}}"
+              ]
+            },
+            "description": "Shows one inventory movement record."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Inventory Movement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1,\n  \"unit_price\": 35,\n  \"stock_before\": 8,\n  \"stock_after\": 7,\n  \"reason\": \"Adjusted from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/inventory-movements/{{inventory_movement_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "inventory-movements",
+                "{{inventory_movement_id}}"
+              ]
+            },
+            "description": "Updates the selected inventory movement."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Inventory Movement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/inventory-movements/{{inventory_movement_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "inventory-movements",
+                "{{inventory_movement_id}}"
+              ]
+            },
+            "description": "Deletes the selected inventory movement."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Admin Products",
       "auth": {
         "type": "bearer",
@@ -683,12 +1915,14 @@
                 {
                   "key": "photos[0]",
                   "type": "file",
-                  "src": ""
+                  "src": "",
+                  "disabled": true
                 },
                 {
                   "key": "photos[1]",
                   "type": "file",
-                  "src": ""
+                  "src": "",
+                  "disabled": true
                 }
               ]
             },
@@ -722,7 +1956,7 @@
             }
           ],
           "request": {
-            "method": "PUT",
+            "method": "POST",
             "header": [
               {
                 "key": "Accept",
@@ -732,6 +1966,11 @@
             "body": {
               "mode": "formdata",
               "formdata": [
+                {
+                  "key": "_method",
+                  "value": "PUT",
+                  "type": "text"
+                },
                 {
                   "key": "name",
                   "value": "{{product_name}} Updated",
@@ -760,7 +1999,8 @@
                 {
                   "key": "photos[0]",
                   "type": "file",
-                  "src": ""
+                  "src": "",
+                  "disabled": true
                 }
               ]
             },
@@ -775,7 +2015,7 @@
                 "{{product_id}}"
               ]
             },
-            "description": "Updates the product metadata and can replace photos using multipart form-data."
+            "description": "Updates the product metadata using multipart form-data. The request uses Laravel method spoofing so file uploads work reliably in Postman."
           },
           "response": []
         },
