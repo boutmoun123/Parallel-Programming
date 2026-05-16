@@ -260,6 +260,11 @@ class ProductService
         });
     }
 
+    public function forgetProductCaches(int $productId): void
+    {
+        $this->clearProductCaches($productId);
+    }
+
     /**
      * @template T of array
      *

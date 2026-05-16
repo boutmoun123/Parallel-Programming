@@ -2,6 +2,7 @@
 
 namespace App\Modules\Invoices\Services;
 
+use App\Models\Order;
 use App\Models\Invoice;
 use Illuminate\Support\Str;
 
@@ -19,6 +20,22 @@ class InvoiceService
             'invoice_number' => $data['invoice_number'] ?? $this->invoiceNumber(),
             'status' => $status,
             'issued_at' => $data['issued_at'] ?? ($status === Invoice::STATUS_ISSUED ? now() : null),
+        ]);
+    }
+
+    public function createInvoiceForOrderIfMissing(Order $order): Invoice
+    {
+        $existingInvoice = Invoice::query()
+            ->where('order_id', $order->id)
+            ->first();
+
+        if ($existingInvoice) {
+            return $existingInvoice;
+        }
+
+        return $this->createInvoice([
+            'order_id' => $order->id,
+            'status' => Invoice::STATUS_ISSUED,
         ]);
     }
 
