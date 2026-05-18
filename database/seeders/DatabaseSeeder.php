@@ -19,5 +19,6 @@ class DatabaseSeeder extends Seeder
         UserSeeder::class,
         ProductSeeder::class
             ]);
+            $this->call(ServerNodeSeeder::class);
     }
 }
