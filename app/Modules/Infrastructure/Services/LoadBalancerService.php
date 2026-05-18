@@ -11,7 +11,6 @@ class LoadBalancerService
     public function acquireNode(): ?ServerNodeAssignment
     {
         return DB::transaction(function (): ?ServerNodeAssignment {
-            // Lock a single candidate row so concurrent requests cannot pick the same node blindly.
             $node = ServerNode::query()
                 ->whereIn('status', [
                     ServerNode::STATUS_ACTIVE,
@@ -19,11 +18,11 @@ class LoadBalancerService
                 ])
                 ->orderByRaw(
                     "CASE WHEN status = ? THEN 0 ELSE 1 END",
-                    [ServerNode::STATUS_ACTIVE],
+                    [ServerNode::STATUS_ACTIVE]
                 )
                 ->orderByRaw('(current_load * 1.0) / max_concurrent_requests')
                 ->orderBy('current_load')
-                ->orderBy('id')
+                ->inRandomOrder()
                 ->lockForUpdate()
                 ->first();
 
@@ -39,7 +38,7 @@ class LoadBalancerService
                 $node->id,
                 $node->name,
                 $node->host,
-                config('load_balancer.strategy', 'least-loaded'),
+                'least-loaded-random-tie',
                 $node->current_load,
             );
         });
