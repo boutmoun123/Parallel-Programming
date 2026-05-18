@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use App\Models\Wallet;
 use App\Modules\Infrastructure\Data\CapacityReservation;
 use App\Modules\Infrastructure\Services\CapacityService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -14,6 +15,13 @@ use Tests\TestCase;
 class CapacityControlTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['wallets.payment_delay_seconds' => 0]);
+    }
 
     public function test_admin_quantity_update_is_rejected_when_critical_capacity_is_exhausted(): void
     {
@@ -66,6 +74,10 @@ class CapacityControlTest extends TestCase
         ]);
 
         Sanctum::actingAs($user);
+        Wallet::create([
+            'user_id' => $user->id,
+            'balance' => 500,
+        ]);
 
         $product = Product::create([
             'name' => 'Checkout Capacity Product',

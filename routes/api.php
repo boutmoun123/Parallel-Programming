@@ -17,6 +17,7 @@ use App\Modules\Products\Controllers\ProductController;
 use App\Modules\RequestLogs\Controllers\RequestLogController;
 use App\Modules\ServerNodes\Controllers\ServerNodeController;
 use App\Modules\Users\Controllers\AuthController;
+use App\Modules\Wallets\Controllers\WalletController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -42,6 +43,13 @@ Route::middleware('load-balance')->group(function (): void {
             Route::get('/', [PaymentController::class, 'index']);
             Route::post('/', [PaymentController::class, 'store'])->middleware('capacity:critical-operations');
             Route::get('/{payment}', [PaymentController::class, 'show']);
+        });
+
+    Route::prefix('wallet')
+        ->middleware('auth:sanctum')
+        ->group(function (): void {
+            Route::get('/', [WalletController::class, 'show']);
+            Route::post('/deposit', [WalletController::class, 'deposit'])->middleware('capacity:critical-operations');
         });
 
     Route::prefix('invoices')

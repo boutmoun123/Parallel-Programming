@@ -11,6 +11,8 @@ use App\Modules\InventoryMovements\Services\InventoryMovementService;
 use App\Modules\Orders\Exceptions\OrderCheckoutException;
 use App\Modules\Payments\Services\PaymentService;
 use App\Modules\Products\Services\ProductService;
+use App\Modules\Wallets\Exceptions\InsufficientWalletBalanceException;
+use App\Modules\Wallets\Services\WalletService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +23,7 @@ class OrderCheckoutService
         private readonly PaymentService $paymentService,
         private readonly InventoryMovementService $inventoryMovementService,
         private readonly ProductService $productService,
+        private readonly WalletService $walletService,
     ) {
     }
 
@@ -89,6 +92,7 @@ class OrderCheckoutService
             $totalItems = 0;
             $totalAmount = 0.0;
             $movements = collect();
+            $checkoutLines = [];
 
             foreach ($orderItems as $orderItem) {
                 $product = $lockedProducts->get($orderItem->product_id);
@@ -113,6 +117,22 @@ class OrderCheckoutService
                     );
                 }
 
+                $totalItems += (int) $orderItem->quantity;
+                $totalAmount += (float) $orderItem->subtotal;
+                $checkoutLines[] = [$orderItem, $product];
+            }
+
+            try {
+                $this->walletService->chargeUserWallet($user->id, round($totalAmount, 2));
+            } catch (InsufficientWalletBalanceException $exception) {
+                throw new OrderCheckoutException(
+                    $exception->getMessage(),
+                    $exception->errors(),
+                    $exception->status(),
+                );
+            }
+
+            foreach ($checkoutLines as [$orderItem, $product]) {
                 $stockBefore = $product->stock_quantity;
 
                 $product->quantity_counter -= $orderItem->quantity;
@@ -132,9 +152,6 @@ class OrderCheckoutService
                     'unit_price' => $orderItem->unit_price,
                     'reason' => 'Atomic checkout completed',
                 ]));
-
-                $totalItems += (int) $orderItem->quantity;
-                $totalAmount += (float) $orderItem->subtotal;
             }
 
             $lockedOrder->fill([

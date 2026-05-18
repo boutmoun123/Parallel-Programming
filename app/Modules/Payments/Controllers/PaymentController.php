@@ -26,9 +26,14 @@ class PaymentController extends Controller
 
     public function store(StorePaymentRequest $request): JsonResponse
     {
-        $payment = $this->paymentService->createPayment($request->validated());
-
-        return $this->success('Payment created successfully', new PaymentResource($payment), 201);
+        return response()->json([
+            'success' => false,
+            'message' => 'Payments must be created through checkout.',
+            'data' => null,
+            'errors' => [
+                'payment' => ['Use the checkout endpoint to create payments.'],
+            ],
+        ], 422);
     }
 
     public function show(Payment $payment): JsonResponse

@@ -6,6 +6,7 @@ use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use App\Models\Wallet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -14,9 +15,17 @@ class OrderCheckoutConcurrencyTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['wallets.payment_delay_seconds' => 0]);
+    }
+
     public function test_checkout_updates_order_payment_and_inventory_atomically(): void
     {
         $user = $this->actingUser('966500000201');
+        $this->fundWallet($user, 500);
         $product = $this->product(stockQuantity: 5, quantityCounter: 5);
         $order = $this->orderForUser($user);
 
@@ -48,6 +57,10 @@ class OrderCheckoutConcurrencyTest extends TestCase
         $this->assertSame(3, $product->quantity_counter);
         $this->assertSame('completed', $order->status);
         $this->assertSame('paid', $order->payment_status);
+        $this->assertDatabaseHas('wallets', [
+            'user_id' => $user->id,
+            'balance' => 259,
+        ]);
         $this->assertDatabaseCount('payments', 1);
         $this->assertDatabaseHas('inventory_movements', [
             'order_id' => $order->id,
@@ -61,6 +74,7 @@ class OrderCheckoutConcurrencyTest extends TestCase
     {
         $product = $this->product(stockQuantity: 3, quantityCounter: 3);
         $firstUser = $this->actingUser('966500000301');
+        $this->fundWallet($firstUser, 500);
         $firstOrder = $this->orderForUser($firstUser);
 
         $this->postJson('/api/order-items', [
@@ -84,6 +98,7 @@ class OrderCheckoutConcurrencyTest extends TestCase
         ]);
 
         Sanctum::actingAs($secondUser);
+        $this->fundWallet($secondUser, 500);
 
         $secondOrder = $this->orderForUser($secondUser);
 
@@ -112,6 +127,58 @@ class OrderCheckoutConcurrencyTest extends TestCase
         $this->assertSame('unpaid', $secondOrder->payment_status);
         $this->assertDatabaseCount('payments', 1);
         $this->assertSame(1, InventoryMovement::query()->count());
+    }
+
+    public function test_checkout_fails_when_wallet_balance_is_insufficient_without_decreasing_stock(): void
+    {
+        $user = $this->actingUser('966500000401');
+        $this->fundWallet($user, 50);
+        $product = $this->product(stockQuantity: 5, quantityCounter: 5);
+        $order = $this->orderForUser($user);
+
+        $this->postJson('/api/order-items', [
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'quantity' => 2,
+            'unit_price' => 120.50,
+        ])->assertCreated();
+
+        $response = $this->postJson("/api/orders/{$order->id}/checkout", [
+            'payment_method' => 'wallet',
+            'idempotency_key' => 'checkout-wallet-insufficient',
+        ]);
+
+        $response->assertStatus(409)
+            ->assertJsonPath('message', 'Insufficient wallet balance.');
+
+        $product->refresh();
+        $order->refresh();
+
+        $this->assertSame(5, $product->stock_quantity);
+        $this->assertSame(5, $product->quantity_counter);
+        $this->assertSame('pending', $order->status);
+        $this->assertSame('unpaid', $order->payment_status);
+        $this->assertDatabaseHas('wallets', [
+            'user_id' => $user->id,
+            'balance' => 50,
+        ]);
+        $this->assertDatabaseCount('payments', 0);
+        $this->assertDatabaseCount('inventory_movements', 0);
+    }
+
+    public function test_standalone_payment_creation_is_rejected(): void
+    {
+        $this->actingUser('966500000402');
+
+        $this->postJson('/api/payments', [
+            'payment_method' => 'wallet',
+            'idempotency_key' => 'standalone-payment-rejected',
+            'amount' => 120.50,
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'Payments must be created through checkout.');
+
+        $this->assertDatabaseCount('payments', 0);
     }
 
     private function actingUser(string $phone): User
@@ -150,6 +217,14 @@ class OrderCheckoutConcurrencyTest extends TestCase
             'quantity_counter' => $quantityCounter,
             'status' => 'active',
             'photos' => [],
+        ]);
+    }
+
+    private function fundWallet(User $user, float $balance): Wallet
+    {
+        return Wallet::create([
+            'user_id' => $user->id,
+            'balance' => $balance,
         ]);
     }
 }
