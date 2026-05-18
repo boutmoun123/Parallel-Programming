@@ -46,6 +46,8 @@ class WalletService
 
     public function depositToUserWallet(int $userId, float|string $amount): Wallet
     {
+        $this->simulatePaymentGatewayDelay();
+
         return DB::transaction(function () use ($userId, $amount): Wallet {
             $wallet = $this->lockedWalletForUser($userId);
             $wallet->balance = round((float) $wallet->balance + (float) $amount, 2);
