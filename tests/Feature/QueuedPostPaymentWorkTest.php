@@ -9,6 +9,7 @@ use App\Models\Notification;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use App\Models\Wallet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
@@ -18,11 +19,19 @@ class QueuedPostPaymentWorkTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['wallets.payment_delay_seconds' => 0]);
+    }
+
     public function test_checkout_dispatches_invoice_and_notification_jobs(): void
     {
         Queue::fake();
 
         $user = $this->actingUser('966500000501');
+        $this->fundWallet($user, 500);
         $product = $this->product();
         $order = $this->orderForUser($user, 'ORD-QUEUE-DISPATCH');
 
@@ -46,6 +55,7 @@ class QueuedPostPaymentWorkTest extends TestCase
     public function test_sync_queue_executes_invoice_and_notification_jobs_after_checkout(): void
     {
         $user = $this->actingUser('966500000502');
+        $this->fundWallet($user, 500);
         $product = $this->product();
         $order = $this->orderForUser($user, 'ORD-QUEUE-SYNC');
 
@@ -111,6 +121,14 @@ class QueuedPostPaymentWorkTest extends TestCase
             'quantity_counter' => 5,
             'status' => 'active',
             'photos' => [],
+        ]);
+    }
+
+    private function fundWallet(User $user, float $balance): Wallet
+    {
+        return Wallet::create([
+            'user_id' => $user->id,
+            'balance' => $balance,
         ]);
     }
 }
