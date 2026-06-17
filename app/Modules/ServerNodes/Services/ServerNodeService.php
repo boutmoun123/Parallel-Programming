@@ -4,17 +4,23 @@ namespace App\Modules\ServerNodes\Services;
 
 use App\Models\ServerNode;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class ServerNodeService
 {
+    private const CACHE_TTL_SECONDS = 30;
+    private const LATEST_SERVER_NODES_CACHE_KEY = 'server-nodes:latest';
+
     /**
      * @return Collection<int, ServerNode>
      */
     public function getLatestServerNodes(): Collection
     {
-        return ServerNode::query()
-            ->latest()
-            ->get();
+        return Cache::store(config('cache.default'))->remember(
+            self::LATEST_SERVER_NODES_CACHE_KEY,
+            now()->addSeconds(self::CACHE_TTL_SECONDS),
+            fn (): Collection => ServerNode::query()->latest()->get(),
+        );
     }
 
     /**
@@ -25,7 +31,10 @@ class ServerNodeService
         $data['status'] ??= ServerNode::STATUS_ACTIVE;
         $data['current_load'] ??= 0;
 
-        return ServerNode::create($this->applyLoadStatus($data));
+        $serverNode = ServerNode::create($this->applyLoadStatus($data));
+        $this->forgetServerNodesCache();
+
+        return $serverNode;
     }
 
     /**
@@ -41,8 +50,14 @@ class ServerNodeService
 
         $serverNode->fill($this->applyLoadStatus($data));
         $serverNode->save();
+        $this->forgetServerNodesCache();
 
-        return $serverNode;
+        return $serverNode->fresh();
+    }
+
+    public static function forgetServerNodesCache(): void
+    {
+        Cache::store(config('cache.default'))->forget(self::LATEST_SERVER_NODES_CACHE_KEY);
     }
 
     /**
