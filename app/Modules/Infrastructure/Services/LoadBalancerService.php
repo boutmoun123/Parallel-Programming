@@ -4,7 +4,6 @@ namespace App\Modules\Infrastructure\Services;
 
 use App\Models\ServerNode;
 use App\Modules\Infrastructure\Data\ServerNodeAssignment;
-use App\Modules\ServerNodes\Services\ServerNodeService;
 use Illuminate\Support\Facades\DB;
 
 class LoadBalancerService
@@ -34,7 +33,6 @@ class LoadBalancerService
             $node->current_load++;
             $this->applyNodeStatus($node);
             $node->save();
-            ServerNodeService::forgetServerNodesCache();
 
             return new ServerNodeAssignment(
                 $node->id,
@@ -61,7 +59,6 @@ class LoadBalancerService
             $node->current_load = max(0, $node->current_load - 1);
             $this->applyNodeStatus($node);
             $node->save();
-            ServerNodeService::forgetServerNodesCache();
         });
     }
 

@@ -15,7 +15,6 @@ use App\Modules\Wallets\Exceptions\InsufficientWalletBalanceException;
 use App\Modules\Wallets\Services\WalletService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class OrderCheckoutService
@@ -37,30 +36,6 @@ class OrderCheckoutService
      * }
      */
     public function checkoutForUser(Order $order, array $data, User $user): array
-    {
-        // Distributed Redis lock: prevents duplicate checkout attempts for the same order
-        // even when the app runs on multiple PHP workers/servers. DB row locks are still
-        // used inside the transaction for ACID stock/payment updates.
-        return Cache::store(config('distributed_locks.store', config('cache.default')))
-            ->lock(
-                "locks:checkout:order:{$order->id}",
-                (int) config('distributed_locks.default_seconds', 30),
-            )
-            ->block(
-                (int) config('distributed_locks.default_wait_seconds', 10),
-                fn (): array => $this->checkoutInsideTransaction($order, $data, $user),
-            );
-    }
-
-    /**
-     * @param  array{payment_method: string, idempotency_key: string}  $data
-     * @return array{
-     *     order: Order,
-     *     payment: Payment,
-     *     inventory_movements: Collection<int, \App\Models\InventoryMovement>
-     * }
-     */
-    private function checkoutInsideTransaction(Order $order, array $data, User $user): array
     {
         return DB::transaction(function () use ($order, $data, $user): array {
             // Lock the order row first so duplicate checkout attempts are serialized.
