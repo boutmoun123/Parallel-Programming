@@ -8,6 +8,7 @@ use App\Models\DailySalesReportItem;
 use App\Models\InventoryMovement;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
@@ -142,6 +143,24 @@ class DailySalesReportBatchProcessingTest extends TestCase
         $this->assertSame(1, $items[1]->total_quantity_sold);
         $this->assertSame('80.00', $items[1]->total_revenue);
         $this->assertSame(2, $items[1]->product_rank);
+    }
+
+    public function test_daily_sales_report_generation_skips_when_same_date_is_already_locked(): void
+    {
+        $lock = Cache::store(config('distributed_locks.store', config('cache.default')))
+            ->lock('locks:daily-sales-report:2026-05-20', 60);
+
+        $this->assertTrue($lock->get());
+
+        try {
+            $report = app(\App\Modules\DailySalesReports\Services\DailySalesReportBatchService::class)
+                ->generateForDate('2026-05-20');
+
+            $this->assertNull($report);
+            $this->assertDatabaseCount('daily_sales_reports', 0);
+        } finally {
+            $lock->release();
+        }
     }
 
     private function user(string $phone): User

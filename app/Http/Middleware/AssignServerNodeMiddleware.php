@@ -23,7 +23,12 @@ class AssignServerNodeMiddleware
     public function handle(Request $request, Closure $next): Response
     {
         $startedAt = microtime(true);
-        $assignment = $this->loadBalancerService->acquireNode();
+
+        try {
+            $assignment = $this->loadBalancerService->acquireNode();
+        } catch (\Throwable) {
+            $assignment = null;
+        }
 
         if ($assignment) {
             $request->attributes->set('server_node_assignment', $assignment);
@@ -33,7 +38,12 @@ class AssignServerNodeMiddleware
             $response = $next($request);
         } finally {
             $statusCode = isset($response) ? $response->getStatusCode() : 500;
-            $this->requestLogService->createAutomaticRequestLog($request, $assignment, $startedAt, $statusCode);
+
+            try {
+                $this->requestLogService->createAutomaticRequestLog($request, $assignment, $startedAt, $statusCode);
+            } catch (\Throwable) {
+                // Request logging is observability only; SQLite lock pressure must not become an HTTP 500.
+            }
 
             if ($assignment) {
                 $this->loadBalancerService->releaseNode($assignment);

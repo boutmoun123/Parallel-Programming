@@ -9,6 +9,7 @@ use App\Models\InventoryMovement;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class DailySalesReportBatchService
 {
@@ -17,69 +18,101 @@ class DailySalesReportBatchService
         GenerateDailySalesReportJob::dispatch($this->normalizeDate($reportDate)->toDateString());
     }
 
-    public function generateForDate(string $reportDate): DailySalesReport
+    public function generateForDate(string $reportDate): ?DailySalesReport
     {
         $date = $this->normalizeDate($reportDate);
         $dateKey = $date->toDateString();
+        $lock = Cache::store(config('distributed_locks.store', config('cache.default')))
+            ->lock("locks:daily-sales-report:{$dateKey}", 60);
 
-        return Cache::store(config('distributed_locks.store', config('cache.default')))
-            ->lock("locks:daily-sales-report:{$dateKey}", 60)
-            ->block(15, function () use ($date): DailySalesReport {
-                $totals = [
-                    'order_ids' => [],
-                    'total_sales' => 0.0,
-                    'total_items_sold' => 0,
-                    'inventory_movements' => 0,
-                    'products' => [],
-                ];
+        if (! $lock->get()) {
+            return DailySalesReport::query()
+                ->whereDate('report_date', $date->toDateString())
+                ->first();
+        }
 
-                InventoryMovement::query()
-                    ->where('type', 'sale')
-                    ->whereBetween('created_at', [$date->startOfDay(), $date->endOfDay()])
-                    ->orderBy('id')
-                    ->chunkById($this->chunkSize(), function ($movements) use (&$totals): void {
-                        foreach ($movements as $movement) {
-                            if ($movement->order_id !== null) {
-                                $totals['order_ids'][$movement->order_id] = true;
-                            }
+        try {
+            $totals = [
+                'order_ids' => [],
+                'total_sales' => 0.0,
+                'total_items_sold' => 0,
+                'inventory_movements' => 0,
+                'products' => [],
+            ];
 
-                            $movementTotal = $movement->total_price !== null
-                                ? (float) $movement->total_price
-                                : round((float) ($movement->unit_price ?? 0) * (int) $movement->quantity, 2);
-
-                            $totals['total_sales'] += $movementTotal;
-                            $totals['total_items_sold'] += (int) $movement->quantity;
-                            $totals['inventory_movements']++;
-
-                            if (! isset($totals['products'][$movement->product_id])) {
-                                $totals['products'][$movement->product_id] = [
-                                    'product_id' => (int) $movement->product_id,
-                                    'total_quantity_sold' => 0,
-                                    'total_revenue' => 0.0,
-                                    'inventory_movements' => 0,
-                                ];
-                            }
-
-                            $totals['products'][$movement->product_id]['total_quantity_sold'] += (int) $movement->quantity;
-                            $totals['products'][$movement->product_id]['total_revenue'] += $movementTotal;
-                            $totals['products'][$movement->product_id]['inventory_movements']++;
+            InventoryMovement::query()
+                ->where('type', 'sale')
+                ->whereBetween('created_at', [$date->startOfDay(), $date->endOfDay()])
+                ->orderBy('id')
+                ->chunkById($this->chunkSize(), function ($movements) use (&$totals): void {
+                    foreach ($movements as $movement) {
+                        if ($movement->order_id !== null) {
+                            $totals['order_ids'][$movement->order_id] = true;
                         }
-                    });
 
-                /** @var array<int, array{product_id:int,total_quantity_sold:int,total_revenue:float,inventory_movements:int}> $productRows */
-                $productRows = array_values($totals['products']);
+                        $movementTotal = $movement->total_price !== null
+                            ? (float) $movement->total_price
+                            : round((float) ($movement->unit_price ?? 0) * (int) $movement->quantity, 2);
 
-                usort($productRows, function (array $left, array $right): int {
-                    $byRevenue = $right['total_revenue'] <=> $left['total_revenue'];
+                        $totals['total_sales'] += $movementTotal;
+                        $totals['total_items_sold'] += (int) $movement->quantity;
+                        $totals['inventory_movements']++;
 
-                    if ($byRevenue !== 0) {
-                        return $byRevenue;
+                        if (! isset($totals['products'][$movement->product_id])) {
+                            $totals['products'][$movement->product_id] = [
+                                'product_id' => (int) $movement->product_id,
+                                'total_quantity_sold' => 0,
+                                'total_revenue' => 0.0,
+                                'inventory_movements' => 0,
+                            ];
+                        }
+
+                        $totals['products'][$movement->product_id]['total_quantity_sold'] += (int) $movement->quantity;
+                        $totals['products'][$movement->product_id]['total_revenue'] += $movementTotal;
+                        $totals['products'][$movement->product_id]['inventory_movements']++;
                     }
-
-                    return $right['total_quantity_sold'] <=> $left['total_quantity_sold'];
                 });
 
-                $report = DB::transaction(function () use ($date, $totals, $productRows): DailySalesReport {
+            /** @var array<int, array{product_id:int,total_quantity_sold:int,total_revenue:float,inventory_movements:int}> $productRows */
+            $productRows = array_values($totals['products']);
+
+            usort($productRows, function (array $left, array $right): int {
+                $byRevenue = $right['total_revenue'] <=> $left['total_revenue'];
+
+                if ($byRevenue !== 0) {
+                    return $byRevenue;
+                }
+
+                return $right['total_quantity_sold'] <=> $left['total_quantity_sold'];
+            });
+
+            $report = $this->writeReportWithRetry($date, $totals, $productRows);
+
+            DailySalesReportService::forgetLatestReportsCache();
+
+            return $report;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * @param array{
+     *     order_ids: array<int|string, bool>,
+     *     total_sales: float,
+     *     total_items_sold: int,
+     *     inventory_movements: int,
+     *     products: array<int|string, mixed>
+     * } $totals
+     * @param array<int, array{product_id:int,total_quantity_sold:int,total_revenue:float,inventory_movements:int}> $productRows
+     */
+    private function writeReportWithRetry(CarbonImmutable $date, array $totals, array $productRows): DailySalesReport
+    {
+        $maxAttempts = 3;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            try {
+                return DB::transaction(function () use ($date, $totals, $productRows): DailySalesReport {
                     $report = DailySalesReport::query()->updateOrCreate(
                         ['report_date' => $date->toDateString()],
                         [
@@ -108,11 +141,16 @@ class DailySalesReportBatchService
 
                     return $report->fresh();
                 });
+            } catch (Throwable $exception) {
+                if ($attempt === $maxAttempts || ! str_contains($exception->getMessage(), 'database is locked')) {
+                    throw $exception;
+                }
 
-                DailySalesReportService::forgetLatestReportsCache();
+                usleep(100_000 * $attempt);
+            }
+        }
 
-                return $report;
-            });
+        throw new \RuntimeException('Daily sales report write failed.');
     }
 
     private function normalizeDate(string $reportDate): CarbonImmutable

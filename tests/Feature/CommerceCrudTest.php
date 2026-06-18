@@ -39,13 +39,13 @@ class CommerceCrudTest extends TestCase
         $cartItemResponse = $this->postJson('/api/cart-items', [
             'cart_id' => $cartId,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 2,
-            'unit_price' => 49.99,
         ]);
 
         $cartItemResponse->assertCreated()
             ->assertJsonPath('data.cart_id', $cartId)
+            ->assertJsonPath('data.product_name', $product->name)
+            ->assertJsonPath('data.unit_price', '49.99')
             ->assertJsonPath('data.subtotal', '99.98');
 
         $cartItemId = $cartItemResponse->json('data.id');
@@ -56,14 +56,13 @@ class CommerceCrudTest extends TestCase
 
         $this->putJson("/api/cart-items/{$cartItemId}", [
             'quantity' => 3,
-            'unit_price' => 50,
         ])->assertOk()
-            ->assertJsonPath('data.subtotal', '150.00');
+            ->assertJsonPath('data.subtotal', '149.97');
 
         $this->getJson("/api/carts/{$cartId}")
             ->assertOk()
             ->assertJsonPath('data.total_items', 3)
-            ->assertJsonPath('data.total_amount', '150.00');
+            ->assertJsonPath('data.total_amount', '149.97');
 
         $this->putJson("/api/carts/{$cartId}", [
             'status' => 'checked_out',
@@ -113,13 +112,13 @@ class CommerceCrudTest extends TestCase
         $orderItemResponse = $this->postJson('/api/order-items', [
             'order_id' => $orderId,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 4,
-            'unit_price' => 25.50,
         ]);
 
         $orderItemResponse->assertCreated()
             ->assertJsonPath('data.order_id', $orderId)
+            ->assertJsonPath('data.product_name', $product->name)
+            ->assertJsonPath('data.unit_price', '25.50')
             ->assertJsonPath('data.subtotal', '102.00');
 
         $orderItemId = $orderItemResponse->json('data.id');
@@ -135,14 +134,13 @@ class CommerceCrudTest extends TestCase
 
         $this->putJson("/api/order-items/{$orderItemId}", [
             'quantity' => 1,
-            'unit_price' => 10,
         ])->assertOk()
-            ->assertJsonPath('data.subtotal', '10.00');
+            ->assertJsonPath('data.subtotal', '25.50');
 
         $this->getJson("/api/orders/{$orderId}")
             ->assertOk()
             ->assertJsonPath('data.total_items', 1)
-            ->assertJsonPath('data.total_amount', '10.00');
+            ->assertJsonPath('data.total_amount', '25.50');
 
         $this->putJson("/api/orders/{$orderId}", [
             'status' => 'completed',
@@ -163,6 +161,45 @@ class CommerceCrudTest extends TestCase
             ->assertOk();
 
         $this->assertDatabaseMissing('orders', ['id' => $orderId]);
+    }
+
+    public function test_cart_item_rejects_client_controlled_price_and_product_name(): void
+    {
+        $this->actingUser();
+        $product = $this->createProduct(49.99);
+
+        $cartResponse = $this->postJson('/api/carts', [
+            'status' => 'active',
+        ])->assertCreated();
+
+        $this->postJson('/api/cart-items', [
+            'cart_id' => $cartResponse->json('data.id'),
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'product_name' => 'Tampered Product',
+            'unit_price' => 0.01,
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['product_name', 'unit_price']);
+    }
+
+    public function test_order_item_rejects_client_controlled_price_and_product_name(): void
+    {
+        $this->actingUser();
+        $product = $this->createProduct(25.50);
+
+        $orderResponse = $this->postJson('/api/orders', [
+            'status' => 'pending',
+            'payment_status' => 'unpaid',
+        ])->assertCreated();
+
+        $this->postJson('/api/order-items', [
+            'order_id' => $orderResponse->json('data.id'),
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'product_name' => 'Tampered Product',
+            'unit_price' => 0.01,
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['product_name', 'unit_price']);
     }
 
     public function test_admin_can_manage_inventory_movements(): void

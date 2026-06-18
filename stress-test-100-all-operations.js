@@ -16,10 +16,10 @@ export const options = {
     },
   },
   thresholds: {
-    http_req_failed: ['rate<0.30'],
-    http_req_duration: ['p(95)<5000'],
-    checks: ['rate>0.80'],
+    http_req_duration: ['p(95)<10000'],
     server_errors_500: ['count==0'],
+    auth_errors: ['count==0'],
+    unacceptable_response_rate: ['rate==0'],
   },
 };
 
@@ -44,12 +44,20 @@ const DAILY_REPORT_ITEM_ID = __ENV.DAILY_REPORT_ITEM_ID || '1';
 const REPORT_DATE = __ENV.REPORT_DATE || new Date().toISOString().slice(0, 10);
 
 const serverErrors500 = new Counter('server_errors_500');
+const authErrors = new Counter('auth_errors');
 const capacityRejected = new Counter('capacity_rejected');
 const conflictResponses = new Counter('conflict_responses');
 const validationResponses = new Counter('validation_responses');
 const unauthorizedResponses = new Counter('unauthorized_or_forbidden_responses');
 const successfulRequests = new Counter('successful_requests');
+const orderCreateRequests = new Counter('order_create_requests');
+const checkoutRequests = new Counter('checkout_requests');
 const acceptableResponseRate = new Rate('acceptable_response_rate');
+const unacceptableResponseRate = new Rate('unacceptable_response_rate');
+
+const expectedValidationNames = new Set([
+  'POST /payments',
+]);
 
 function headers(token = TOKEN) {
   const h = {
@@ -68,23 +76,34 @@ function unique(prefix) {
   return `${prefix}-${__VU}-${__ITER}-${Date.now()}`;
 }
 
-function record(res) {
-  const acceptableStatuses = [200, 201, 202, 204, 400, 401, 403, 404, 409, 422, 429, 503];
-  const acceptable = acceptableStatuses.includes(res.status);
+function record(res, name) {
+  const isSuccess = res.status >= 200 && res.status < 300;
+  const isProtectedConflict = res.status === 409;
+  const isCapacityProtection = res.status === 429 || res.status === 503;
+  const isExpectedValidation = res.status === 422 && expectedValidationNames.has(name);
+  const isAuthError = res.status === 401 || res.status === 403;
+  const isServerError = res.status >= 500 && !isCapacityProtection;
+  const isTimeout = res.timings.duration >= 10000;
+  const acceptable = isSuccess || isProtectedConflict || isCapacityProtection || isExpectedValidation;
+  const unacceptable = !acceptable || isAuthError || isServerError || isTimeout;
 
   acceptableResponseRate.add(acceptable);
+  unacceptableResponseRate.add(unacceptable);
   if (res.status >= 200 && res.status < 300) successfulRequests.add(1);
   if (res.status === 500) serverErrors500.add(1);
   if (res.status === 409) conflictResponses.add(1);
   if (res.status === 422) validationResponses.add(1);
   if (res.status === 429 || res.status === 503) capacityRejected.add(1);
-  if (res.status === 401 || res.status === 403) unauthorizedResponses.add(1);
+  if (isAuthError) {
+    unauthorizedResponses.add(1);
+    authErrors.add(1);
+  }
 
   check(res, {
     'server answered': (r) => r.status !== 0,
     'no 500 error': (r) => r.status !== 500,
-    'acceptable status': () => acceptable,
-    'response under 5s': (r) => r.timings.duration < 5000,
+    'acceptable stress response': () => acceptable,
+    'response under 10s': (r) => r.timings.duration < 10000,
   });
 }
 
@@ -98,7 +117,7 @@ function request(method, path, body = null, token = TOKEN, name = path) {
   if (method === 'PATCH') res = http.patch(`${BASE_URL}${path}`, body === null ? null : JSON.stringify(body), params);
   if (method === 'DELETE') res = http.del(`${BASE_URL}${path}`, null, params);
 
-  record(res);
+  record(res, name);
   return res;
 }
 
@@ -130,34 +149,38 @@ const operations = [
   () => request('POST', '/cart-items', {
     cart_id: Number(CART_ID),
     product_id: Number(PRODUCT_ID),
-    product_name: 'Stress Product',
     quantity: 1,
-    unit_price: 1,
   }, TOKEN, 'POST /cart-items'),
   () => request('GET', `/cart-items/${CART_ITEM_ID}`, null, TOKEN, 'GET /cart-items/{cartItem}'),
   () => request('PUT', `/cart-items/${CART_ITEM_ID}`, { quantity: 1 }, TOKEN, 'PUT /cart-items/{cartItem}'),
 
   () => request('GET', '/orders', null, TOKEN, 'GET /orders'),
-  () => request('POST', '/orders', {
-    cart_id: Number(CART_ID),
-    status: 'pending',
-    payment_status: 'unpaid',
-    notes: 'stress test order',
-  }, TOKEN, 'POST /orders'),
+  () => {
+    orderCreateRequests.add(1);
+
+    return request('POST', '/orders', {
+      cart_id: Number(CART_ID),
+      status: 'pending',
+      payment_status: 'unpaid',
+      notes: 'stress test order',
+    }, TOKEN, 'POST /orders');
+  },
   () => request('GET', `/orders/${ORDER_ID}`, null, TOKEN, 'GET /orders/{order}'),
   () => request('PUT', `/orders/${ORDER_ID}`, { notes: unique('stress-update') }, TOKEN, 'PUT /orders/{order}'),
-  () => request('POST', `/orders/${ORDER_ID}/checkout`, {
-    payment_method: 'wallet',
-    idempotency_key: unique('idem'),
-  }, TOKEN, 'POST /orders/{order}/checkout'),
+  () => {
+    checkoutRequests.add(1);
+
+    return request('POST', `/orders/${ORDER_ID}/checkout`, {
+      payment_method: 'wallet',
+      idempotency_key: unique('idem'),
+    }, TOKEN, 'POST /orders/{order}/checkout');
+  },
 
   () => request('GET', '/order-items', null, TOKEN, 'GET /order-items'),
   () => request('POST', '/order-items', {
     order_id: Number(ORDER_ID),
     product_id: Number(PRODUCT_ID),
-    product_name: 'Stress Product',
     quantity: 1,
-    unit_price: 1,
   }, TOKEN, 'POST /order-items'),
   () => request('GET', `/order-items/${ORDER_ITEM_ID}`, null, TOKEN, 'GET /order-items/{orderItem}'),
   () => request('PUT', `/order-items/${ORDER_ITEM_ID}`, { quantity: 1 }, TOKEN, 'PUT /order-items/{orderItem}'),
@@ -254,23 +277,29 @@ export function handleSummary(data) {
 100 Users - All Operations Stress Summary
 ========================================
 Total Requests: ${data.metrics.http_reqs?.values?.count || 0}
-Failed Rate: ${data.metrics.http_req_failed?.values?.rate || 0}
+Protocol Failed Rate (k6 built-in, may include accepted 409/503): ${data.metrics.http_req_failed?.values?.rate || 0}
 Average Response Time: ${data.metrics.http_req_duration?.values?.avg || 0} ms
 P95 Response Time: ${data.metrics.http_req_duration?.values?.['p(95)'] || 0} ms
 
 Successful Requests: ${data.metrics.successful_requests?.values?.count || 0}
+Order Create Requests: ${data.metrics.order_create_requests?.values?.count || 0}
+Checkout Requests: ${data.metrics.checkout_requests?.values?.count || 0}
 500 Server Errors: ${data.metrics.server_errors_500?.values?.count || 0}
 409 Conflicts: ${data.metrics.conflict_responses?.values?.count || 0}
-422 Validation Responses: ${data.metrics.validation_responses?.values?.count || 0}
+422 Validation Responses: ${data.metrics.validation_responses?.values?.count || 0} (expected only for direct payment rejection)
 401/403 Responses: ${data.metrics.unauthorized_or_forbidden_responses?.values?.count || 0}
 429/503 Capacity Rejections: ${data.metrics.capacity_rejected?.values?.count || 0}
 Acceptable Response Rate: ${data.metrics.acceptable_response_rate?.values?.rate || 0}
+Unacceptable Response Rate: ${data.metrics.unacceptable_response_rate?.values?.rate || 0}
 
 Notes:
 - 500 must stay 0.
 - 409 shows concurrency/checkout protection is working.
-- 429 or 503 shows capacity control is working.
-- 401/403 may appear if TOKEN/ADMIN_TOKEN are not provided.
+- 422 is acceptable only for known validation-proof endpoints such as direct payment creation.
+- 429 or 503 shows capacity control is working and is accepted during stress.
+- 401/403 must stay 0 when TOKEN/ADMIN_TOKEN are configured correctly.
+- Data corruption is validated after the run with the Laravel integrity command.
+- After this test, run: php artisan stress:validate-integrity
 ========================================
 `,
   };

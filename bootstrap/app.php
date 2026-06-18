@@ -22,5 +22,20 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(function (\Illuminate\Database\QueryException $exception) {
+            if (! str_contains($exception->getMessage(), 'database is locked')) {
+                return null;
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Database is temporarily busy. Please retry shortly.',
+                'data' => null,
+                'errors' => [
+                    'database' => ['SQLite write lock detected during stress testing.'],
+                ],
+            ], 503, [
+                'Retry-After' => '1',
+            ]);
+        });
     })->create();

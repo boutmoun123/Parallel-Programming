@@ -68,13 +68,18 @@ class ProductController extends Controller
     }
 
     /**
-     * @return array{source: string, response_time_ms: float}
+     * @return array<string, mixed>
      */
     private function meta(string $source, float $startedAt): array
     {
-        return [
-            'source' => $source,
+        $meta = [
             'response_time_ms' => round((microtime(true) - $startedAt) * 1000, 2),
         ];
+
+        if (config('app.debug')) {
+            $meta['cache_source'] = $source;
+        }
+
+        return $meta;
     }
 }

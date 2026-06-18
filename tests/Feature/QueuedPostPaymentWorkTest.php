@@ -38,9 +38,7 @@ class QueuedPostPaymentWorkTest extends TestCase
         $this->postJson('/api/order-items', [
             'order_id' => $order->id,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 1,
-            'unit_price' => 75.25,
         ])->assertCreated();
 
         $this->postJson("/api/orders/{$order->id}/checkout", [
@@ -62,9 +60,7 @@ class QueuedPostPaymentWorkTest extends TestCase
         $this->postJson('/api/order-items', [
             'order_id' => $order->id,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 1,
-            'unit_price' => 75.25,
         ])->assertCreated();
 
         $this->postJson("/api/orders/{$order->id}/checkout", [
