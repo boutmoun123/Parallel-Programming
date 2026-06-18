@@ -4,6 +4,7 @@ namespace App\Modules\CartItems\Services;
 
 use App\Models\Cart;
 use App\Models\CartItem;
+use App\Models\Product;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -111,6 +112,13 @@ class CartItemService
      */
     private function normalizeLineItemData(array $data): array
     {
+        $product = Product::query()
+            ->whereKey($data['product_id'])
+            ->where('status', 'active')
+            ->firstOrFail();
+
+        $data['product_name'] = $product->name;
+        $data['unit_price'] = $product->price;
         $data['subtotal'] = round((float) $data['unit_price'] * (int) $data['quantity'], 2);
 
         return $data;

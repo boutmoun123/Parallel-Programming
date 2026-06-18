@@ -4,6 +4,7 @@ namespace App\Modules\OrderItems\Services;
 
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Product;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -111,6 +112,13 @@ class OrderItemService
      */
     private function normalizeLineItemData(array $data): array
     {
+        $product = Product::query()
+            ->whereKey($data['product_id'])
+            ->where('status', 'active')
+            ->firstOrFail();
+
+        $data['product_name'] = $product->name;
+        $data['unit_price'] = $product->price;
         $data['subtotal'] = round((float) $data['unit_price'] * (int) $data['quantity'], 2);
 
         return $data;

@@ -49,6 +49,8 @@ const conflictResponses = new Counter('conflict_responses');
 const validationResponses = new Counter('validation_responses');
 const unauthorizedResponses = new Counter('unauthorized_or_forbidden_responses');
 const successfulRequests = new Counter('successful_requests');
+const orderCreateRequests = new Counter('order_create_requests');
+const checkoutRequests = new Counter('checkout_requests');
 const acceptableResponseRate = new Rate('acceptable_response_rate');
 
 function headers(token = TOKEN) {
@@ -130,34 +132,38 @@ const operations = [
   () => request('POST', '/cart-items', {
     cart_id: Number(CART_ID),
     product_id: Number(PRODUCT_ID),
-    product_name: 'Stress Product',
     quantity: 1,
-    unit_price: 1,
   }, TOKEN, 'POST /cart-items'),
   () => request('GET', `/cart-items/${CART_ITEM_ID}`, null, TOKEN, 'GET /cart-items/{cartItem}'),
   () => request('PUT', `/cart-items/${CART_ITEM_ID}`, { quantity: 1 }, TOKEN, 'PUT /cart-items/{cartItem}'),
 
   () => request('GET', '/orders', null, TOKEN, 'GET /orders'),
-  () => request('POST', '/orders', {
-    cart_id: Number(CART_ID),
-    status: 'pending',
-    payment_status: 'unpaid',
-    notes: 'stress test order',
-  }, TOKEN, 'POST /orders'),
+  () => {
+    orderCreateRequests.add(1);
+
+    return request('POST', '/orders', {
+      cart_id: Number(CART_ID),
+      status: 'pending',
+      payment_status: 'unpaid',
+      notes: 'stress test order',
+    }, TOKEN, 'POST /orders');
+  },
   () => request('GET', `/orders/${ORDER_ID}`, null, TOKEN, 'GET /orders/{order}'),
   () => request('PUT', `/orders/${ORDER_ID}`, { notes: unique('stress-update') }, TOKEN, 'PUT /orders/{order}'),
-  () => request('POST', `/orders/${ORDER_ID}/checkout`, {
-    payment_method: 'wallet',
-    idempotency_key: unique('idem'),
-  }, TOKEN, 'POST /orders/{order}/checkout'),
+  () => {
+    checkoutRequests.add(1);
+
+    return request('POST', `/orders/${ORDER_ID}/checkout`, {
+      payment_method: 'wallet',
+      idempotency_key: unique('idem'),
+    }, TOKEN, 'POST /orders/{order}/checkout');
+  },
 
   () => request('GET', '/order-items', null, TOKEN, 'GET /order-items'),
   () => request('POST', '/order-items', {
     order_id: Number(ORDER_ID),
     product_id: Number(PRODUCT_ID),
-    product_name: 'Stress Product',
     quantity: 1,
-    unit_price: 1,
   }, TOKEN, 'POST /order-items'),
   () => request('GET', `/order-items/${ORDER_ITEM_ID}`, null, TOKEN, 'GET /order-items/{orderItem}'),
   () => request('PUT', `/order-items/${ORDER_ITEM_ID}`, { quantity: 1 }, TOKEN, 'PUT /order-items/{orderItem}'),
@@ -259,6 +265,8 @@ Average Response Time: ${data.metrics.http_req_duration?.values?.avg || 0} ms
 P95 Response Time: ${data.metrics.http_req_duration?.values?.['p(95)'] || 0} ms
 
 Successful Requests: ${data.metrics.successful_requests?.values?.count || 0}
+Order Create Requests: ${data.metrics.order_create_requests?.values?.count || 0}
+Checkout Requests: ${data.metrics.checkout_requests?.values?.count || 0}
 500 Server Errors: ${data.metrics.server_errors_500?.values?.count || 0}
 409 Conflicts: ${data.metrics.conflict_responses?.values?.count || 0}
 422 Validation Responses: ${data.metrics.validation_responses?.values?.count || 0}
@@ -271,6 +279,7 @@ Notes:
 - 409 shows concurrency/checkout protection is working.
 - 429 or 503 shows capacity control is working.
 - 401/403 may appear if TOKEN/ADMIN_TOKEN are not provided.
+- After this test, run: php artisan stress:validate-integrity
 ========================================
 `,
   };

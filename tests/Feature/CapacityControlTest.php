@@ -101,9 +101,7 @@ class CapacityControlTest extends TestCase
         $this->postJson('/api/order-items', [
             'order_id' => $order->id,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 1,
-            'unit_price' => 99.99,
         ])->assertCreated();
 
         $this->postJson("/api/orders/{$order->id}/checkout", [

@@ -32,9 +32,7 @@ class OrderCheckoutConcurrencyTest extends TestCase
         $this->postJson('/api/order-items', [
             'order_id' => $order->id,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 2,
-            'unit_price' => 120.50,
         ])->assertCreated();
 
         $response = $this->postJson("/api/orders/{$order->id}/checkout", [
@@ -80,9 +78,7 @@ class OrderCheckoutConcurrencyTest extends TestCase
         $this->postJson('/api/order-items', [
             'order_id' => $firstOrder->id,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 2,
-            'unit_price' => 120.50,
         ])->assertCreated();
 
         $this->postJson("/api/orders/{$firstOrder->id}/checkout", [
@@ -105,9 +101,7 @@ class OrderCheckoutConcurrencyTest extends TestCase
         $this->postJson('/api/order-items', [
             'order_id' => $secondOrder->id,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 2,
-            'unit_price' => 120.50,
         ])->assertCreated();
 
         $response = $this->postJson("/api/orders/{$secondOrder->id}/checkout", [
@@ -139,9 +133,7 @@ class OrderCheckoutConcurrencyTest extends TestCase
         $this->postJson('/api/order-items', [
             'order_id' => $order->id,
             'product_id' => $product->id,
-            'product_name' => $product->name,
             'quantity' => 2,
-            'unit_price' => 120.50,
         ])->assertCreated();
 
         $response = $this->postJson("/api/orders/{$order->id}/checkout", [
@@ -165,6 +157,58 @@ class OrderCheckoutConcurrencyTest extends TestCase
         ]);
         $this->assertDatabaseCount('payments', 0);
         $this->assertDatabaseCount('inventory_movements', 0);
+    }
+
+    public function test_duplicate_idempotency_key_is_rejected_without_second_payment_or_stock_decrement(): void
+    {
+        $product = $this->product(stockQuantity: 5, quantityCounter: 5);
+        $firstUser = $this->actingUser('966500000403');
+        $this->fundWallet($firstUser, 500);
+        $firstOrder = $this->orderForUser($firstUser);
+
+        $this->postJson('/api/order-items', [
+            'order_id' => $firstOrder->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ])->assertCreated();
+
+        $this->postJson("/api/orders/{$firstOrder->id}/checkout", [
+            'payment_method' => 'wallet',
+            'idempotency_key' => 'duplicate-idempotency-proof',
+        ])->assertOk();
+
+        $secondUser = User::create([
+            'name' => 'Duplicate Idempotency User',
+            'phone' => '966500000404',
+            'password' => 'User12345',
+            'role' => 'user',
+        ]);
+
+        Sanctum::actingAs($secondUser);
+        $this->fundWallet($secondUser, 500);
+        $secondOrder = $this->orderForUser($secondUser);
+
+        $this->postJson('/api/order-items', [
+            'order_id' => $secondOrder->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ])->assertCreated();
+
+        $this->postJson("/api/orders/{$secondOrder->id}/checkout", [
+            'payment_method' => 'wallet',
+            'idempotency_key' => 'duplicate-idempotency-proof',
+        ])->assertStatus(409)
+            ->assertJsonPath('message', 'Idempotency key has already been used.');
+
+        $product->refresh();
+        $secondOrder->refresh();
+
+        $this->assertSame(4, $product->stock_quantity);
+        $this->assertSame(4, $product->quantity_counter);
+        $this->assertSame('pending', $secondOrder->status);
+        $this->assertSame('unpaid', $secondOrder->payment_status);
+        $this->assertDatabaseCount('payments', 1);
+        $this->assertDatabaseCount('inventory_movements', 1);
     }
 
     public function test_standalone_payment_creation_is_rejected(): void
