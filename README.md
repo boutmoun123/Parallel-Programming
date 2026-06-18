@@ -25,6 +25,7 @@ Use Redis for the academic demo:
 CACHE_STORE=redis
 DISTRIBUTED_LOCK_STORE=redis
 CAPACITY_STORE=redis
+LOAD_BALANCER_STORE=redis
 QUEUE_CONNECTION=redis
 ```
 
@@ -95,7 +96,8 @@ This project currently provides application-level load distribution simulation:
 
 - `AssignServerNodeMiddleware` assigns each request to a server node.
 - `LoadBalancerService` uses a least-loaded strategy with random tie-breaking.
-- Server load changes are protected by database transactions and `lockForUpdate`.
+- `server_nodes` is configuration data only. It stores node name, host, status, and capacity.
+- Per-request volatile load is stored in Redis/cache counters, not in SQLite.
 - `RequestLogService` stores which simulated node handled the request.
 
 Reason for selected strategy:
@@ -108,6 +110,16 @@ Remaining limitation:
 
 - `docker-compose.yml` currently starts Redis only. It does not yet run multiple Laravel app containers behind an actual Nginx upstream. For a production-style deployment proof, add `app1`, `app2`, and `nginx` services with an Nginx `upstream` block.
 
+SQLite stress bottleneck and fix:
+
+- During k6 stress testing, SQLite can throw `SQLSTATE[HY000]: database is locked` when many requests write at the same time.
+- The original bottleneck was updating `server_nodes.current_load` on every request.
+- The fix keeps `server_nodes` as configuration only and moves high-frequency load counters to Redis/cache keys such as `server-nodes:{id}:volatile-load`.
+- If Redis/cache is temporarily unavailable, node selection falls back to static `server_nodes` configuration and continues serving the request.
+- If node assignment or request logging fails during SQLite lock pressure, the request continues with `X-Server-Node: unassigned` instead of returning HTTP 500.
+- MySQL solves the SQLite single-writer bottleneck by allowing safer concurrent writes under stress. Redis remains responsible for volatile counters and locks.
+- For production or stronger stress-test proof, use MySQL/PostgreSQL for write-heavy tables and Redis for volatile counters.
+
 ## Redis Caching
 
 Product catalog reads use cache keys with TTL:
@@ -118,7 +130,23 @@ Product catalog reads use cache keys with TTL:
 
 The cache is invalidated when products are created, updated, deleted, or when checkout changes stock.
 
+Product endpoints expose `meta.cache_source` only when `APP_DEBUG=true`. In production, cache/database source details are hidden and only timing metadata remains visible.
+
 Wallet and daily report summaries also use cache with invalidation after mutations.
+
+## Database Indexes
+
+Performance indexes are added in `2026_06_18_000001_add_performance_indexes.php`:
+
+- `orders.status`
+- `orders.user_id`
+- `inventory_movements.product_id`
+- `inventory_movements.type`
+- `products.quantity_counter`
+- `request_logs.server_node_id`
+- `daily_sales_reports.report_date`
+
+`payments.idempotency_key` is already protected by a unique index in the original payments migration, so duplicate payment keys are prevented at the database level.
 
 ## Locking Strategy
 
@@ -131,6 +159,26 @@ The project uses pessimistic locking for sensitive updates:
 - `WalletService::lockedWalletForUser`
 
 Redis locks are used for distributed coordination, while database row locks protect ACID updates.
+
+## Troubleshooting
+
+### Redis `__PHP_Incomplete_Class` in Server Nodes
+
+Do not cache Eloquent model collections directly in Redis. Serialized Eloquent collections can become stale after code changes, class loading changes, or deployment changes, and may come back as `__PHP_Incomplete_Class`.
+
+Server node configuration is handled safely:
+
+- `server_nodes` remains database configuration data.
+- `ServerNodeService::getLatestServerNodes` uses cache key `server-nodes:latest:v2`.
+- The cached value is a primitive array, not an Eloquent collection.
+- The service reconstructs a valid `Illuminate\Database\Eloquent\Collection` before returning.
+- If cached data is invalid, the cache key is forgotten and the database is queried again.
+- The legacy key `server-nodes:latest` is cleared to avoid old serialized values.
+
+Redis live counters remain separate from server node configuration:
+
+- Live load key: `server-nodes:{id}:volatile-load`
+- Config cache key: `server-nodes:latest:v2`
 
 ## ACID Transactions
 
@@ -148,6 +196,14 @@ Rollback proof is covered by tests for insufficient wallet balance and duplicate
 ## Stress Testing
 
 The k6 script ramps to at least 100 concurrent virtual users and includes product reads, order creation, order-item creation, checkout, reports, and benchmark result writes.
+
+Stress classification rules:
+
+- `409` is acceptable because it proves concurrency protection or duplicate checkout prevention.
+- `429` and capacity-related `503` are acceptable because they prove resource control.
+- `422` is acceptable only for known validation-proof requests, such as direct payment creation being rejected.
+- `401`, `403`, `500`, unexpected responses, and p95 response time above the threshold fail the test.
+- Data corruption is checked after k6 with `php artisan stress:validate-integrity`.
 
 Run:
 
@@ -183,15 +239,15 @@ Expected output example:
 ```text
 Products cache benchmark
 ------------------------
-Cold database read: 18 ms
-Warm cache average: 2 ms
-Benchmark result stored.
+Cold database read: 18 ms, DB queries: 1
+Warm cache average: 2 ms, DB queries: 0
+Benchmark results stored.
 ```
 
 Run checkout benchmark:
 
 ```bash
-php artisan benchmark:checkout
+php artisan benchmark:checkout --queued-connection=redis
 ```
 
 Expected output example:
@@ -200,9 +256,9 @@ Expected output example:
 Checkout benchmark
 ------------------
 Iterations: 5
-Average response time: 35 ms
-Max response time: 52 ms
-Benchmark result stored.
+Sync average/max: 45 ms / 60 ms
+Queued average/max: 30 ms / 42 ms
+Benchmark results stored.
 ```
 
 Academic before/after comparison:
@@ -210,8 +266,9 @@ Academic before/after comparison:
 | Scenario | Before Optimization | After Optimization | Evidence |
 |---|---:|---:|---|
 | Product listing | Cold DB read measured by first `benchmark:products-cache` request | Warm Redis cache average measured over repeated requests | `benchmark_results` row with operation `products-cache` |
-| Post-payment work | Invoice and notification would run in the checkout request | Jobs are dispatched after commit and processed by queue worker | `IssueOrderInvoiceJob`, `SendPaymentSuccessNotificationJob` |
+| Post-payment work | `benchmark:checkout` with sync queue includes invoice and notification work in checkout timing | `benchmark:checkout` with Redis queue dispatches post-payment work outside the request path | `benchmark_results` rows for synchronous and queued checkout |
 | Checkout bottleneck | High contention can corrupt stock without locks | Redis lock plus DB row locks serialize checkout safely | `OrderCheckoutService`, `stress:validate-integrity` |
+| SQLite load distribution bottleneck | Per-request writes to `server_nodes.current_load` can trigger `database is locked` under k6 | Redis/cache volatile counters remove the hot SQLite write path | `LoadBalancerService`, `AssignServerNodeMiddleware`, `LoadDistributionTest` |
 
 ## AOP Performance Monitoring
 

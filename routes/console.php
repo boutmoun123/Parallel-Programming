@@ -3,6 +3,7 @@
 use App\Jobs\GenerateDailySalesReportJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
@@ -120,10 +121,15 @@ Artisan::command('benchmark:products-cache {--iterations=50}', function () {
 
     $cache->forget('products:active:list');
 
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
     $coldStart = microtime(true);
     $service->activeProducts();
     $coldMs = (int) round((microtime(true) - $coldStart) * 1000);
+    $coldQueryCount = count(DB::getQueryLog());
 
+    DB::flushQueryLog();
     $warmStart = microtime(true);
 
     for ($i = 0; $i < $iterations; $i++) {
@@ -131,39 +137,58 @@ Artisan::command('benchmark:products-cache {--iterations=50}', function () {
     }
 
     $warmAverageMs = (int) round(((microtime(true) - $warmStart) * 1000) / $iterations);
+    $warmQueryCount = count(DB::getQueryLog());
+
+    DB::disableQueryLog();
 
     \App\Models\BenchmarkResult::query()->create([
         'operation_name' => 'products-cache',
-        'scenario' => 'cold database read vs warm Redis cache read',
+        'scenario' => 'before Redis warmup: cold database read',
         'concurrent_users' => 1,
-        'total_requests' => $iterations + 1,
-        'successful_requests' => $iterations + 1,
+        'total_requests' => 1,
+        'successful_requests' => 1,
+        'failed_requests' => 0,
+        'average_response_time_ms' => $coldMs,
+        'max_response_time_ms' => $coldMs,
+        'throughput_per_second' => $coldMs > 0 ? round(1000 / $coldMs, 2) : null,
+        'bottleneck_note' => "Cold product listing used {$coldQueryCount} database queries.",
+        'optimization_applied' => 'none; baseline database read',
+        'tested_at' => now(),
+    ]);
+
+    \App\Models\BenchmarkResult::query()->create([
+        'operation_name' => 'products-cache',
+        'scenario' => 'after Redis warmup: cached product read',
+        'concurrent_users' => 1,
+        'total_requests' => $iterations,
+        'successful_requests' => $iterations,
         'failed_requests' => 0,
         'average_response_time_ms' => $warmAverageMs,
-        'max_response_time_ms' => max($coldMs, $warmAverageMs),
+        'max_response_time_ms' => $warmAverageMs,
         'throughput_per_second' => $warmAverageMs > 0 ? round(1000 / $warmAverageMs, 2) : null,
-        'bottleneck_note' => "Cold read {$coldMs} ms; warm average {$warmAverageMs} ms over {$iterations} iterations.",
+        'bottleneck_note' => "Warm product listing used {$warmQueryCount} database queries over {$iterations} cached reads.",
         'optimization_applied' => 'Redis product catalog cache',
         'tested_at' => now(),
     ]);
 
     $this->line('Products cache benchmark');
     $this->line("------------------------");
-    $this->line("Cold database read: {$coldMs} ms");
-    $this->line("Warm cache average: {$warmAverageMs} ms");
-    $this->info('Benchmark result stored.');
+    $this->line("Cold database read: {$coldMs} ms, DB queries: {$coldQueryCount}");
+    $this->line("Warm cache average: {$warmAverageMs} ms, DB queries: {$warmQueryCount}");
+    $this->info('Benchmark results stored.');
 
     return 0;
 })->purpose('Benchmark product listing before and after cache warmup');
 
-Artisan::command('benchmark:checkout {--iterations=5}', function () {
+Artisan::command('benchmark:checkout {--iterations=5} {--queued-connection=redis}', function () {
     $iterations = max(1, (int) $this->option('iterations'));
+    $queuedConnection = (string) $this->option('queued-connection');
     $service = app(\App\Modules\Orders\Services\OrderCheckoutService::class);
-    $durations = [];
+    $originalQueue = config('queue.default');
 
-    for ($i = 0; $i < $iterations; $i++) {
+    $makeFixture = function (string $prefix, int $i): array {
         $user = \App\Models\User::query()->create([
-            'name' => "Benchmark User {$i}",
+            'name' => "Benchmark {$prefix} User {$i}",
             'phone' => '966599'.str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT),
             'password' => 'Benchmark12345',
             'role' => 'user',
@@ -175,7 +200,7 @@ Artisan::command('benchmark:checkout {--iterations=5}', function () {
         ]);
 
         $product = \App\Models\Product::query()->create([
-            'name' => "Benchmark Product {$i}",
+            'name' => "Benchmark {$prefix} Product {$i}",
             'description' => 'Created by benchmark:checkout',
             'price' => 10,
             'stock_quantity' => 10,
@@ -186,7 +211,7 @@ Artisan::command('benchmark:checkout {--iterations=5}', function () {
 
         $order = \App\Models\Order::query()->create([
             'user_id' => $user->id,
-            'order_number' => 'BENCH-'.now()->format('YmdHis').'-'.\Illuminate\Support\Str::upper(\Illuminate\Support\Str::random(6)),
+            'order_number' => 'BENCH-'.\Illuminate\Support\Str::upper($prefix).'-'.now()->format('YmdHis').'-'.\Illuminate\Support\Str::upper(\Illuminate\Support\Str::random(6)),
             'status' => 'pending',
             'payment_status' => 'unpaid',
             'total_items' => 0,
@@ -202,38 +227,63 @@ Artisan::command('benchmark:checkout {--iterations=5}', function () {
             'subtotal' => $product->price,
         ]);
 
-        $startedAt = microtime(true);
-        $service->checkoutForUser($order, [
-            'payment_method' => 'wallet',
-            'idempotency_key' => 'benchmark-checkout-'.$order->id.'-'.\Illuminate\Support\Str::uuid(),
-        ], $user);
-        $durations[] = (int) round((microtime(true) - $startedAt) * 1000);
+        return [$user, $order];
+    };
+
+    $runScenario = function (string $scenario, string $queueConnection) use ($iterations, $service, $makeFixture): array {
+        config(['queue.default' => $queueConnection]);
+        $durations = [];
+
+        for ($i = 0; $i < $iterations; $i++) {
+            [$user, $order] = $makeFixture($scenario, $i);
+
+            $startedAt = microtime(true);
+            $service->checkoutForUser($order, [
+                'payment_method' => 'wallet',
+                'idempotency_key' => "benchmark-checkout-{$scenario}-{$order->id}-".\Illuminate\Support\Str::uuid(),
+            ], $user);
+            $durations[] = (int) round((microtime(true) - $startedAt) * 1000);
+        }
+
+        return [
+            'average_ms' => (int) round(array_sum($durations) / count($durations)),
+            'max_ms' => max($durations),
+        ];
+    };
+
+    try {
+        $sync = $runScenario('sync', 'sync');
+        $queued = $runScenario('queued', $queuedConnection);
+    } finally {
+        config(['queue.default' => $originalQueue]);
     }
 
-    $averageMs = (int) round(array_sum($durations) / count($durations));
-    $maxMs = max($durations);
-
-    \App\Models\BenchmarkResult::query()->create([
-        'operation_name' => 'checkout',
-        'scenario' => 'checkout with Redis locks, DB transactions, and queued post-payment work',
-        'concurrent_users' => 1,
-        'total_requests' => $iterations,
-        'successful_requests' => $iterations,
-        'failed_requests' => 0,
-        'average_response_time_ms' => $averageMs,
-        'max_response_time_ms' => $maxMs,
-        'throughput_per_second' => $averageMs > 0 ? round(1000 / $averageMs, 2) : null,
-        'bottleneck_note' => 'Checkout path includes wallet charge, row locks, stock update, order update, payment creation.',
-        'optimization_applied' => 'Redis distributed locks + queued invoice/notification jobs',
-        'tested_at' => now(),
-    ]);
+    foreach ([
+        ['label' => 'synchronous post-payment work', 'result' => $sync, 'optimization' => 'sync queue baseline'],
+        ['label' => "queued post-payment work ({$queuedConnection})", 'result' => $queued, 'optimization' => 'queue offloading for invoice and notification jobs'],
+    ] as $row) {
+        \App\Models\BenchmarkResult::query()->create([
+            'operation_name' => 'checkout',
+            'scenario' => $row['label'],
+            'concurrent_users' => 1,
+            'total_requests' => $iterations,
+            'successful_requests' => $iterations,
+            'failed_requests' => 0,
+            'average_response_time_ms' => $row['result']['average_ms'],
+            'max_response_time_ms' => $row['result']['max_ms'],
+            'throughput_per_second' => $row['result']['average_ms'] > 0 ? round(1000 / $row['result']['average_ms'], 2) : null,
+            'bottleneck_note' => 'Checkout includes wallet charge, row locks, stock update, order update, payment creation, and post-payment work.',
+            'optimization_applied' => $row['optimization'],
+            'tested_at' => now(),
+        ]);
+    }
 
     $this->line('Checkout benchmark');
     $this->line('------------------');
     $this->line("Iterations: {$iterations}");
-    $this->line("Average response time: {$averageMs} ms");
-    $this->line("Max response time: {$maxMs} ms");
-    $this->info('Benchmark result stored.');
+    $this->line("Sync average/max: {$sync['average_ms']} ms / {$sync['max_ms']} ms");
+    $this->line("Queued average/max: {$queued['average_ms']} ms / {$queued['max_ms']} ms");
+    $this->info('Benchmark results stored.');
 
     return 0;
 })->purpose('Benchmark the optimized checkout path and store the result');
